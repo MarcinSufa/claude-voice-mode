@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Generated audio / temp
+*.mp3
+*.wav
+claude_auto_speak_*.txt
+
+# Local voice-mode state (lives in ~/.claude/, never in the repo — listed defensively)
+.voice-mode-on
+.voice-mode.json
+.voice-playback.pid
+
+# OS
+.DS_Store
+Thumbs.db

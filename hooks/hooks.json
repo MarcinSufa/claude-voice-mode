@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/skills/text-to-speech/auto_speak_hook.py"
+            ],
+            "timeout": 20,
+            "statusMessage": "Speaking reply..."
+          }
+        ]
+      }
+    ]
+  }
+}
