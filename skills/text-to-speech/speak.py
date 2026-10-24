@@ -3,15 +3,21 @@
 
 Thin wrapper so the whole job is one command instead of write-file + edge-tts + open.
 The edge-tts CLI is often NOT on PATH even when the package is installed, so we use
-the Python API directly (robust across machines).
+the Python API when this interpreter can import it, and fall back to the `edge-tts`
+command (what `pipx install` / `uv tool install` provide) when it can't.
 
 Examples:
-    python speak.py --voice en-US-AndrewNeural --file script.txt
-    python speak.py --voice pl-PL-MarekNeural  --text "Cześć, jak się masz?"
-    python speak.py --voice en-US-AndrewNeural --file script.txt --rate -8% --no-play
+    python3 speak.py --voice en-US-AndrewNeural --file script.txt
+    python3 speak.py --voice pl-PL-MarekNeural  --text "Cześć, jak się masz?"
+    python3 speak.py --voice en-US-AndrewNeural --file script.txt --rate -8% --no-play
+
+Playback tries ffplay, mpv, mpg123, afplay (macOS), then the desktop default app
+(Windows startfile, Linux xdg-open). If none can play it, the mp3 is kept and its path printed.
 
 --replace : stop any playback this skill started before playing (one voice at a time).
---cleanup : delete the output mp3 (and the --file, if it's a temp file) after playing.
+--cleanup : delete the output mp3 (and the --file, if it's a temp file) after it played.
+            The mp3 is kept when nothing played it, or when it was handed to the desktop's
+            default app (that app still needs the file).
 The auto-speak hook passes both so rapid replies don't overlap or litter temp.
 """
 import argparse
@@ -21,51 +27,56 @@ import subprocess
 import sys
 import tempfile
 
+from shutil import which
+
 try:
     import edge_tts
 except ImportError:
-    sys.exit("edge-tts not installed. Run:  python -m pip install --user edge-tts")
+    edge_tts = None  # fall back to the `edge-tts` command, see synth()
 
 import voice_config as vc
 
-
-def kill_previous_playback() -> None:
-    """Terminate the ffplay this skill last started, if it's still going."""
-    pid = vc.read_pid()
-    if pid:
-        vc.kill_pid(pid)
-        vc.clear_pid()
+MISSING = ("edge-tts not installed. Install it with one of:  pipx install edge-tts  |  "
+           "uv tool install edge-tts  |  a venv + pip install edge-tts  "
+           "(Windows: python -m pip install --user edge-tts)")
 
 
-def play(path: str, replace: bool = False) -> None:
-    """Play the audio (best-effort, cross-platform).
+def play(path: str, replace: bool = False) -> str:
+    """Play the audio with the first player that works (best-effort, cross-platform).
 
-    Prefers ffplay (silent, no popup window, auto-exits) since ffmpeg is usually present.
-    When replace=True, stops the prior ffplay first and records this one's PID so the next
-    --replace call can stop it. Falls back to the OS default player.
+    Returns "played" (a player finished it), "stopped" (cut off by --replace or
+    `voicemode.py stop`), "launched" (handed to the desktop default app, which returns at
+    once) or "none" (no player could play it; the path is printed instead).
+    With replace=True, stops the prior player first and records this one's PID so the next
+    --replace call can stop it.
     """
-    from shutil import which
-
-    try:
-        if which("ffplay"):
+    players = vc.audio_players()
+    for name, argv, blocks in players:
+        try:
+            if not blocks:
+                if argv is None:
+                    os.startfile(path)  # type: ignore[attr-defined]
+                elif subprocess.run(argv + [path], stdin=subprocess.DEVNULL, check=False).returncode != 0:
+                    continue
+                return "launched"
             if replace:
-                kill_previous_playback()
-            proc = subprocess.Popen(
-                ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", path]
-            )
+                vc.stop_playback()
+            proc = subprocess.Popen(argv + [path], stdin=subprocess.DEVNULL)
             if replace:
                 vc.write_pid(proc.pid)
-            proc.wait()
-            if replace and vc.read_pid() == proc.pid:
+            rc = proc.wait()
+            still_ours = vc.read_pid() == proc.pid
+            if replace and still_ours:
                 vc.clear_pid()  # only clear if a newer reply hasn't already replaced us
-        elif sys.platform == "win32":
-            os.startfile(path)  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.run(["afplay", path], check=False)
-        else:
-            subprocess.run(["xdg-open", path], check=False)
-    except Exception as exc:  # playback is non-fatal; the file still exists
-        print(f"(could not auto-play: {exc}) file is at: {path}", file=sys.stderr)
+            if rc == 0:
+                return "played"
+            if rc < 0 or (replace and not still_ours):
+                return "stopped"  # killed on purpose: don't fall through to the next player
+        except Exception:
+            continue  # this player failed to start or crashed; try the next one
+    tried = ", ".join(p[0] for p in players) or "no player found on PATH"
+    print(f"(could not auto-play; tried: {tried}) file is at: {path}", file=sys.stderr)
+    return "none"
 
 
 def cleanup_temp(*paths: str) -> None:
@@ -81,9 +92,28 @@ def cleanup_temp(*paths: str) -> None:
             pass
 
 
-async def synth(text: str, voice: str, out: str, rate: str, pitch: str) -> None:
+async def synth_api(text: str, voice: str, out: str, rate: str, pitch: str) -> None:
     communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
     await communicate.save(out)
+
+
+def synth(text: str, voice: str, out: str, rate: str, pitch: str, text_file: str = "") -> None:
+    """Write the speech to `out`, via the Python API or else the `edge-tts` command."""
+    if edge_tts is not None:
+        asyncio.run(synth_api(text, voice, out, rate, pitch))
+        return
+    cli = which("edge-tts")
+    if not cli:
+        sys.exit(MISSING)
+    # "--opt=value" so values like "-10%" aren't parsed as flags; a file avoids argv size limits.
+    src = f"--file={text_file}" if text_file else f"--text={text}"
+    proc = subprocess.run(
+        [cli, f"--voice={voice}", f"--rate={rate}", f"--pitch={pitch}", src, f"--write-media={out}"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if proc.returncode != 0:
+        sys.exit(f"edge-tts failed (exit {proc.returncode}): {proc.stderr.strip()[-500:]}")
 
 
 def main() -> None:
@@ -109,14 +139,20 @@ def main() -> None:
         sys.exit("Nothing to speak: text is empty.")
 
     out = args.out or os.path.join(tempfile.gettempdir(), "speak.mp3")
-    asyncio.run(synth(text, args.voice, out, args.rate, args.pitch))
+    synth(text, args.voice, out, args.rate, args.pitch, text_file=args.file or "")
 
     size = os.path.getsize(out)
-    print(f"Wrote {out} ({size:,} bytes) voice={args.voice} rate={args.rate} pitch={args.pitch}")
+    print(f"Wrote {out} ({size:,} bytes) voice={args.voice} rate={args.rate} pitch={args.pitch}", flush=True)
+    result = "not played (--no-play)"
     if not args.no_play:
-        play(out, replace=args.replace)
+        result = play(out, replace=args.replace)
     if args.cleanup:
-        cleanup_temp(out, args.file)
+        if result in ("played", "stopped"):
+            cleanup_temp(out, args.file)
+        else:
+            cleanup_temp(args.file)  # never delete the only copy of audio nobody has heard
+            why = {"none": "nothing could play it", "launched": "the default app still needs it"}
+            print(f"Kept {out} ({why.get(result, result)})")
 
 
 if __name__ == "__main__":

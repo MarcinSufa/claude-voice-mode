@@ -8,13 +8,15 @@ avoids duplicating the flag-file format and config defaults in three places.
 State files (all under ~/.claude/):
   .voice-mode-on    flag: "" (off) | "ALL" | "PENDING" | "<session_id>|<unix_ts>"
   .voice-mode.json  optional user config (see DEFAULTS)
-  .voice-playback.pid  PID of the currently-playing ffplay (so a new reply can stop it)
+  .voice-playback.pid  PID of the currently-playing player (so a new reply can stop it)
 """
 import json
 import os
 import re
 import signal
+import sys
 import time
+from shutil import which
 
 HOME = os.path.expanduser("~")
 FLAG_FILE = os.path.join(HOME, ".claude", ".voice-mode-on")
@@ -115,6 +117,14 @@ def clear_pid() -> None:
         pass
 
 
+def stop_playback() -> None:
+    """Stop the player this skill last started. The PID file is cleared BEFORE the kill, so the
+    player's owner (speak.py) sees the PID is no longer its own and treats the exit as "stopped"."""
+    pid = read_pid()
+    clear_pid()
+    kill_pid(pid)
+
+
 def kill_pid(pid) -> None:
     """Best-effort terminate. os.kill TerminateProcess's on Windows; PID reuse risk is acceptable here."""
     if not pid:
@@ -123,6 +133,37 @@ def kill_pid(pid) -> None:
         os.kill(int(pid), signal.SIGTERM)
     except (OSError, ValueError, ProcessLookupError):
         pass
+
+
+# --- audio players (speak.py tries them in this order) ---------------------------------
+
+# Players that block until the clip ends: their PID is tracked so --replace / `voicemode.py stop`
+# can cut them off. edge-tts always writes MP3 data, so WAV-only players (aplay) are not listed.
+_BLOCKING_PLAYERS = (
+    ("ffplay", ["-nodisp", "-autoexit", "-loglevel", "quiet"]),
+    ("mpv", ["--no-video", "--no-terminal"]),
+    ("mpg123", ["-q"]),
+    ("afplay", []),  # macOS
+)
+
+
+def audio_players():
+    """Return the players available here, in try order: [(name, argv_before_path, blocks)].
+
+    blocks=False means a hand-off to the desktop's default app (Windows startfile, xdg-open):
+    it returns at once, so the file must outlive the call and playback can't be stopped.
+    argv is None for os.startfile.
+    """
+    found = []
+    for name, extra in _BLOCKING_PLAYERS:
+        exe = which(name)
+        if exe:
+            found.append((name, [exe] + extra, True))
+    if sys.platform == "win32":
+        found.append(("startfile", None, False))
+    elif sys.platform != "darwin" and which("xdg-open"):
+        found.append(("xdg-open", [which("xdg-open")], False))
+    return found
 
 
 # --- language detection (pick a Polish voice for Polish replies) -----------------------
