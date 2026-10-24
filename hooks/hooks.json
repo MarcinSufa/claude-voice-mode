@@ -5,10 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/skills/text-to-speech/auto_speak_hook.py"
-            ],
+            "command": "for p in python3 python py; do \"$p\" -c 'import sys; sys.exit(sys.version_info[0] != 3)' </dev/null >/dev/null 2>&1 && exec \"$p\" \"${CLAUDE_PLUGIN_ROOT}/skills/text-to-speech/auto_speak_hook.py\"; done; exit 0",
             "timeout": 20,
             "statusMessage": "Speaking reply..."
           }
