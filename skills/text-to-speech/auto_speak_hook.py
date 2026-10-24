@@ -2,10 +2,11 @@
 """Claude Code `Stop` hook: speak the assistant's last reply aloud — when voice mode is ON.
 
 Wiring: auto-registered by the voice-mode plugin via hooks/hooks.json, which runs
-    python "${CLAUDE_PLUGIN_ROOT}/skills/text-to-speech/auto_speak_hook.py"
-on the Stop event. (To wire it by hand, add the same command to settings.json -> hooks.Stop.)
+    python3 "${CLAUDE_PLUGIN_ROOT}/skills/text-to-speech/auto_speak_hook.py"
+on the Stop event (falling back to `python`, then `py`, and exiting 0 silently if none exists).
+To wire it by hand, copy the command from hooks/hooks.json into settings.json -> hooks.Stop.
 
-Toggle:  python voicemode.py on | off | status | stop   (presence of the flag file = ON)
+Toggle:  python3 voicemode.py on | off | status | stop   (presence of the flag file = ON)
 
 Design notes:
 - A hook is not an LLM: it strips markdown / drops code blocks with plain rules, then
@@ -15,6 +16,7 @@ Design notes:
 - Each reply is synthesized to a unique temp file and played with --replace, so a new
   reply stops the previous one instead of talking over it.
 - Never blocks the session: synth+play is launched detached, and the hook always exits 0.
+- If no audio player is installed, nothing is synthesized (so no text is sent to Microsoft).
 """
 import json
 import os
@@ -140,6 +142,9 @@ def settled_assistant_text(path: str, tries: int = 20, interval: float = 0.12) -
 
 def speak_reply(transcript_path: str) -> None:
     """Worker (runs detached): extract the settled final reply, clean it, synth + play."""
+    players = vc.audio_players()
+    if not players:
+        return  # nothing could play it, so don't send the reply to Microsoft at all
     cfg = vc.load_config()
     raw = settled_assistant_text(transcript_path)
     lang = vc.detect_lang(raw)
@@ -153,15 +158,28 @@ def speak_reply(transcript_path: str) -> None:
     tmp = tempfile.gettempdir()
     script_path = os.path.join(tmp, f"claude_auto_speak_{stamp}.txt")
     out_path = os.path.join(tmp, f"claude_auto_speak_{stamp}.mp3")
-    with open(script_path, "w", encoding="utf-8") as fh:
-        fh.write(spoken)
-    subprocess.run(
-        [sys.executable, SPEAK_PY, "--voice", voice, "--file", script_path,
-         "--out", out_path, "--rate", cfg["rate"], "--pitch", cfg["pitch"],
-         "--replace", "--cleanup"],
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        check=False,
-    )
+    rc = 1
+    try:
+        with open(script_path, "w", encoding="utf-8") as fh:
+            fh.write(spoken)
+        rc = subprocess.run(
+            [sys.executable, SPEAK_PY, "--voice", voice, "--file", script_path,
+             "--out", out_path, "--rate", cfg["rate"], "--pitch", cfg["pitch"],
+             "--replace", "--cleanup"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+    finally:
+        # speak.py --cleanup removes both files after playback. It keeps the mp3 when nothing
+        # played it, or when a desktop app (xdg-open / startfile) still has to open it; only that
+        # last case needs the file, so drop it otherwise (e.g. edge-tts missing or synth failed).
+        handed_off = rc == 0 and any(not blocks for _, _, blocks in players)
+        for path in (script_path, None if handed_off else out_path):
+            try:
+                if path and os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
 
 
 def main() -> None:
@@ -181,6 +199,8 @@ def main() -> None:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
+    if not isinstance(payload, dict):
+        sys.exit(0)
 
     if not session_gate(payload, cfg):
         sys.exit(0)
@@ -189,14 +209,15 @@ def main() -> None:
     if not transcript_path or not os.path.exists(transcript_path):
         sys.exit(0)
 
-    flags = 0
     if sys.platform == "win32":
-        flags = subprocess.CREATE_NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0)
+        detach = {"creationflags": subprocess.CREATE_NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0)}
+    else:
+        detach = {"start_new_session": True}  # own session: survives the hook's process group
     try:
         subprocess.Popen(
             [sys.executable, os.path.abspath(__file__), "--worker", transcript_path],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=flags, close_fds=True,
+            close_fds=True, **detach,
         )
     except Exception:
         pass  # never let playback failure surface as a hook error

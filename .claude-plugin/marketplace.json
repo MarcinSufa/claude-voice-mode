@@ -1,7 +1,7 @@
 {
   "name": "claude-voice-mode",
   "metadata": {
-    "description": "Voice mode for Claude Code — speak text aloud and have Claude read its replies, via free offline edge-tts neural voices."
+    "description": "Voice mode for Claude Code — speak text aloud and have Claude read its replies, via edge-tts Microsoft neural voices (free, no API key; text is sent to Microsoft's Edge read-aloud service)."
   },
   "owner": {
     "name": "Marcin Sufa",
@@ -11,7 +11,7 @@
     {
       "name": "voice-mode",
       "source": "./",
-      "description": "Hear Claude talk. One-off text-to-speech on demand, plus an opt-in auto-speak mode (Stop hook) that reads every reply aloud — session-scoped so only one window speaks. Free Microsoft neural voices via edge-tts, English + Polish auto-detect, silent playback.",
+      "description": "Hear Claude talk. One-off text-to-speech on demand, plus an opt-in auto-speak mode (Stop hook) that reads every reply aloud — session-scoped so only one window speaks. Free Microsoft neural voices via edge-tts (no API key; text is sent to Microsoft's Edge read-aloud service), English + Polish auto-detect, silent playback.",
       "author": { "name": "Marcin Sufa" },
       "category": "productivity",
       "homepage": "https://github.com/MarcinSufa/claude-voice-mode"

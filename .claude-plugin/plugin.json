@@ -1,7 +1,7 @@
 {
   "name": "voice-mode",
-  "version": "0.1.0",
-  "description": "Hear Claude talk. One-off text-to-speech on demand, plus an opt-in auto-speak mode (Stop hook) that reads every reply aloud — session-scoped so only one window speaks. Free Microsoft neural voices via edge-tts, English + Polish auto-detect, silent playback through ffplay.",
+  "version": "0.1.1",
+  "description": "Hear Claude talk. One-off text-to-speech on demand, plus an opt-in auto-speak mode (Stop hook) that reads every reply aloud — session-scoped so only one window speaks. Free Microsoft neural voices via edge-tts (no API key; text is sent to Microsoft's Edge read-aloud service), English + Polish auto-detect, silent playback through ffplay, mpv, mpg123 or afplay.",
   "author": {
     "name": "Marcin Sufa",
     "email": "sufa.marcin@gmail.com",

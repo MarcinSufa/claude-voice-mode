@@ -3,11 +3,11 @@
 
 Voice mode is SESSION-SCOPED by default so only one Claude session speaks:
 
-    python voicemode.py on         # arm: the next session to reply claims it (one session only)
-    python voicemode.py on all     # every session speaks (global)
-    python voicemode.py off        # turn off everywhere (also stops current playback)
-    python voicemode.py status     # report current state
-    python voicemode.py stop       # stop the current playback now (voice mode stays on)
+    python3 voicemode.py on         # arm: the next session to reply claims it (one session only)
+    python3 voicemode.py on all     # every session speaks (global)
+    python3 voicemode.py off        # turn off everywhere (also stops current playback)
+    python3 voicemode.py status     # report current state
+    python3 voicemode.py stop       # stop the current playback now (voice mode stays on)
 
 The flag file holds: "PENDING" (armed, unclaimed), "ALL" (global), or "<session_id>|<ts>"
 (claimed, with a heartbeat). A claim idle past stale_hours is auto-reclaimed by the next
@@ -39,13 +39,11 @@ def main() -> None:
             os.remove(vc.FLAG_FILE)
         except FileNotFoundError:
             pass
-        vc.kill_pid(vc.read_pid())
-        vc.clear_pid()
+        vc.stop_playback()
         print("voice mode: OFF")
 
     elif cmd in ("stop", "shut-up", "quiet"):
-        vc.kill_pid(vc.read_pid())
-        vc.clear_pid()
+        vc.stop_playback()
         print("playback stopped (voice mode still on)")
 
     elif cmd == "status":
