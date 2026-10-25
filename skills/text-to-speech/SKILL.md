@@ -55,6 +55,7 @@ Markdown reads terribly aloud. Before synthesizing, rewrite into clean prose:
 
 ## Auto-speak mode (Stop hook)
 A `Stop` hook (shipped by this plugin via `hooks/hooks.json`, running `auto_speak_hook.py`) speaks replies aloud — gated by a toggle, silent until opted in. Markdown is stripped, then the **whole reply** is synthesized to a unique temp file and played with `--replace` so a new reply **stops** the previous one instead of talking over it. Plays in the background with the first of ffplay, mpv, mpg123, afplay (macOS) that is installed, else the desktop's default app (Windows, `xdg-open`). If no player is installed, the hook does nothing (no text is sent). (Default `max_chars: 0` = no cap, read the full answer; set a positive `max_chars` to truncate at a sentence boundary instead.)
+Auto-speak temp files left behind by desktop-app playback are swept on the next reply when they are older than 15 minutes.
 
 **Auto language**: a Polish-looking reply is read with the Polish voice automatically; everything else uses the English voice. **Config** lives in `~/.claude/.voice-mode.json` (optional) — override `voice`, `voice_pl`, `max_chars`, `rate`, `pitch`, `stale_hours`. This is how you change the auto-speak voice without editing code (the hook can't ask each time).
 

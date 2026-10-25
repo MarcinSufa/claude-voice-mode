@@ -21,6 +21,7 @@ Design notes:
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,8 @@ import voice_config as vc
 
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 SPEAK_PY = os.path.join(SKILL_DIR, "speak.py")
+STALE_AFTER_S = 15 * 60
+AUTO_SPEAK_TEMP_RE = re.compile(r"claude_auto_speak_\d+\.(?:mp3|txt)\Z")
 
 # Spoken-out substitutions so the voice doesn't mangle initialisms (English replies only).
 SAY_AS = {
@@ -140,6 +143,32 @@ def settled_assistant_text(path: str, tries: int = 20, interval: float = 0.12) -
     return best
 
 
+def sweep_stale(tmp_dir: str, now: float, max_age: float) -> list:
+    """Remove old regular auto-speak temp files directly inside tmp_dir."""
+    removed = []
+    try:
+        entries = os.scandir(tmp_dir)
+    except OSError:
+        return removed
+    try:
+        with entries:
+            for entry in entries:
+                if not AUTO_SPEAK_TEMP_RE.fullmatch(entry.name):
+                    continue
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                    if not stat.S_ISREG(info.st_mode) or now - info.st_mtime <= max_age:
+                        continue
+                    path = entry.path
+                    os.remove(path)
+                    removed.append(path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return removed
+
+
 def speak_reply(transcript_path: str) -> None:
     """Worker (runs detached): extract the settled final reply, clean it, synth + play."""
     players = vc.audio_players()
@@ -156,6 +185,7 @@ def speak_reply(transcript_path: str) -> None:
     # Unique per-reply files so a fast follow-up reply can't overwrite text mid-read.
     stamp = time.time_ns()
     tmp = tempfile.gettempdir()
+    sweep_stale(tmp, time.time(), STALE_AFTER_S)
     script_path = os.path.join(tmp, f"claude_auto_speak_{stamp}.txt")
     out_path = os.path.join(tmp, f"claude_auto_speak_{stamp}.mp3")
     rc = 1

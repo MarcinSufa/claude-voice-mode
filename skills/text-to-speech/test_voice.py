@@ -54,6 +54,57 @@ check("polish skips API expansion", "A.P.I." not in hook.clean_markdown("the API
 check("cap breaks at sentence when far enough in", hook.cap("A" * 130 + ". " + "B" * 600, 200).endswith("."))
 check("cap hard-truncates when no good boundary", len(hook.cap("x" * 600, 50)) == 50)
 
+# --- stale auto-speak temp files ---
+with tempfile.TemporaryDirectory() as tmp:
+    now = time.time()
+    stale_mp3 = os.path.join(tmp, "claude_auto_speak_123.mp3")
+    stale_txt = os.path.join(tmp, "claude_auto_speak_456.txt")
+    fresh_mp3 = os.path.join(tmp, "claude_auto_speak_789.mp3")
+    similar = [os.path.join(tmp, name) for name in
+               ("claude_auto_speak_x.mp3", "speak.mp3", "claude_auto_speak_12.log")]
+    nested = os.path.join(tmp, "subdir")
+    os.mkdir(nested)
+    nested_file = os.path.join(nested, "claude_auto_speak_999.mp3")
+    for path in (stale_mp3, stale_txt, fresh_mp3, *similar, nested_file):
+        parent = os.path.dirname(path)
+        if not os.path.isdir(parent):
+            os.makedirs(parent)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("temp")
+    os.utime(stale_mp3, (now - 901, now - 901))
+    os.utime(stale_txt, (now - 901, now - 901))
+    stale_target = os.path.join(tmp, "speak.mp3")
+    os.utime(stale_target, (now - 901, now - 901))
+    link = os.path.join(tmp, "claude_auto_speak_999.txt")
+    link_created = False
+    try:
+        os.symlink(stale_target, link)
+        link_created = True
+    except OSError:
+        print("SKIP stale symlink check (symlinks unavailable)")
+    link_check = False
+    if link_created:
+        if os.utime in os.supports_follow_symlinks:
+            try:
+                os.utime(link, (now - 901, now - 901), follow_symlinks=False)
+                link_check = True
+            except OSError:
+                print("SKIP stale symlink check (cannot set link timestamp)")
+        else:
+            print("SKIP stale symlink check (no no-follow utime support)")
+    try:
+        removed = hook.sweep_stale(tmp, now, 900)
+    except AttributeError:
+        removed = None
+    check("stale matching mp3 and txt removed", removed is not None and
+          set(removed) == {stale_mp3, stale_txt} and
+          not os.path.exists(stale_mp3) and not os.path.exists(stale_txt))
+    check("fresh, similar, and nested files kept",
+          all(os.path.exists(path) for path in (fresh_mp3, *similar, nested_file)))
+    if link_check:
+        check("old matching symlink kept", os.path.islink(link) and os.path.exists(link) and
+              os.path.lexists(link))
+
 # --- config ---
 cfg = vc.load_config()
 check("config has voice", "voice" in cfg and "voice_pl" in cfg and "max_chars" in cfg)
