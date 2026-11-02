@@ -71,7 +71,7 @@ Optional `~/.claude/.voice-mode.json` overrides the defaults:
 
 ## How it works
 
-The `Stop` hook does a fast gate check, then hands off to a **detached worker** that waits for the transcript to finish flushing before extracting the final reply (avoids reading a pre-tool preamble), strips markdown, drops code blocks, and synthesizes. Because it's detached, your session is never blocked. Shared logic lives in `voice_config.py`. Tests: `cd skills/text-to-speech && python3 test_voice.py` (no network, no audio; covers the pure functions, the exact hook command from `hooks/hooks.json`, and the playback/cleanup paths).
+The `Stop` hook does a fast gate check, then hands off to a **detached worker** that waits for the transcript to finish flushing before extracting the final reply (avoids reading a pre-tool preamble), strips markdown, drops code blocks, and synthesizes. Because it's detached, your session is never blocked. Shared logic lives in `voice_config.py`. Tests: `cd skills/text-to-speech && python3 test_voice.py` (no network, no audio; covers the pure functions, the exact hook command from `hooks/hooks.json`, and the playback/cleanup paths). CI runs them on Ubuntu and Windows.
 
 ## Privacy
 
